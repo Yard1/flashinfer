@@ -46,6 +46,7 @@ void BatchPrefillWithPagedKVCachePyTorchWrapper::BeginForward(
       int_workspace_buffer.size(0) * int_workspace_buffer.element_size();
   cudaStream_t torch_current_stream = c10::cuda::getCurrentCUDAStream(device.index());
   handler_->SetCUDAStream(torch_current_stream);
+  handler_->SetOutputSize(qo_indptr.index({-1}).item<int32_t>());
 
   DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FP16(empty_q_data.scalar_type(), q_type, [&] {
     cudaError_t status = handler_->BeginForward<q_type, int32_t>(
@@ -68,13 +69,14 @@ void BatchPrefillWithPagedKVCachePyTorchWrapper::UpdatePageLockedBufferSize(
 }
 
 std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
-    torch::Tensor q, torch::Tensor qo_indptr, std::optional<torch::Tensor> paged_kv_cache,
+    torch::Tensor q, torch::Tensor qo_indptr, std::optional<torch::Tensor> qo_indptr_base, std::optional<torch::Tensor> paged_kv_cache,
     std::optional<torch::Tensor> paged_k_cache, std::optional<torch::Tensor> paged_v_cache,
     torch::Tensor paged_kv_indptr, torch::Tensor paged_kv_indices,
     torch::Tensor paged_kv_last_page_len, bool causal, unsigned int pos_encoding_mode,
     bool allow_fp16_qk_reduction, int window_left, float logits_soft_cap, float sm_scale,
     float rope_scale, float rope_theta, bool return_lse) {
   bool paged_kv_defined = paged_kv_cache.has_value();
+  bool qo_indptr_base_defined = qo_indptr_base.has_value();
   CHECK_INPUT(q);
   CHECK_INPUT(qo_indptr);
   if (paged_kv_defined) {
@@ -82,6 +84,9 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
   } else {
     CHECK_INPUT(paged_k_cache.value());
     CHECK_INPUT(paged_v_cache.value());
+  }
+  if (qo_indptr_base_defined) {
+    CHECK_INPUT(qo_indptr_base.value());
   }
   CHECK_INPUT(paged_kv_indptr);
   CHECK_INPUT(paged_kv_indices);
@@ -93,6 +98,9 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
   } else {
     CHECK_EQ(device, paged_k_cache->device());
     CHECK_EQ(device, paged_v_cache->device());
+  }
+  if (qo_indptr_base_defined) {
+    CHECK_EQ(device, qo_indptr_base->device());
   }
   CHECK_EQ(device, paged_kv_indptr.device());
   CHECK_EQ(device, paged_kv_indices.device());
@@ -110,16 +118,20 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
     CHECK_DIM(4, paged_k_cache.value());
     CHECK_DIM(4, paged_v_cache.value());
   }
+  if (qo_indptr_base_defined) {
+    CHECK_DIM(1, qo_indptr_base.value());
+  }
 
   CHECK_DIM(1, paged_kv_indptr);         // (B + 1,)
   CHECK_DIM(1, paged_kv_indices);        // (nnz_kv,)
   CHECK_DIM(1, paged_kv_last_page_len);  // (B,)
   int64_t batch_size = qo_indptr.size(0) - 1;
-  int64_t nnz_qo = q.size(0);
   int64_t num_qo_heads = q.size(1);
   int64_t head_dim = q.size(2);
   int64_t num_kv_heads, page_size;
-
+  if (qo_indptr_base_defined) {
+    CHECK_EQ(batch_size, qo_indptr_base->size(0));
+  }
   if (paged_kv_defined) {
     CHECK_EQ(paged_kv_cache->size(1), 2);
     CHECK_EQ(paged_kv_cache->size(4), head_dim);
@@ -149,12 +161,21 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
   paged_kv_indptr = paged_kv_indptr.to(torch::kInt32);
   paged_kv_indices = paged_kv_indices.to(torch::kInt32);
   paged_kv_last_page_len = paged_kv_last_page_len.to(torch::kInt32);
-
+  int32_t* qo_indptr_base_ptr;
+  if (qo_indptr_base_defined) {
+    qo_indptr_base_ptr = static_cast<int32_t*>(qo_indptr_base.value().to(torch::kInt32).data_ptr());
+  }
+  else {
+    qo_indptr_base_ptr = nullptr;
+  }
   cudaStream_t torch_current_stream = c10::cuda::getCurrentCUDAStream(device.index());
-  torch::Tensor o = torch::empty_like(q, q.options());
+  auto output_size = handler_->GetOutputSize();
+  if (output_size < 0)
+    output_size = q.size(0);
+  torch::Tensor o = torch::empty({output_size, num_qo_heads, head_dim}, q.options());
   torch::Tensor lse = torch::empty({0});
   if (return_lse) {
-    lse = torch::empty({nnz_qo, num_qo_heads}, q.options().dtype(torch::kFloat32));
+    lse = torch::empty({output_size, num_qo_heads}, q.options().dtype(torch::kFloat32));
   }
   MaskMode mask_mode = causal ? MaskMode::kCausal : MaskMode::kNone;
   TORCH_CHECK(logits_soft_cap >= 0.f, "logits_soft_cap must be non-negative");
@@ -186,7 +207,7 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
                             PageStorage::kIndices, HEAD_DIM, LOGITS_POST_HOOK, POS_ENCODING_MODE,
                             ALLOW_FP16_QK_REDUCTION, MASK_MODE, c_type, c_type, c_type, int32_t>(
                             handler_.get(), static_cast<c_type*>(q.data_ptr()),
-                            static_cast<int32_t*>(qo_indptr.data_ptr()),
+                            static_cast<int32_t*>(qo_indptr.data_ptr()), qo_indptr_base_ptr,
                             /*q_offset=*/nullptr, paged_kv,
                             /*custom_mask=*/nullptr,
                             /*qk_indptr=*/nullptr, static_cast<c_type*>(o.data_ptr()),
@@ -229,7 +250,7 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::Forward(
                               PageStorage::kIndices, HEAD_DIM, LOGITS_POST_HOOK, POS_ENCODING_MODE,
                               ALLOW_FP16_QK_REDUCTION, MASK_MODE, q_type, kv_type, q_type, int32_t>(
                               handler_.get(), static_cast<q_type*>(q.data_ptr()),
-                              static_cast<int32_t*>(qo_indptr.data_ptr()),
+                              static_cast<int32_t*>(qo_indptr.data_ptr()), qo_indptr_base_ptr,
                               /*q_offset=*/nullptr, paged_kv,
                               /*custom_mask=*/nullptr,
                               /*qk_indptr=*/nullptr, static_cast<q_type*>(o.data_ptr()),
@@ -381,7 +402,7 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::ForwardCu
                       cudaError_t status = BatchPrefillWithPagedKVCacheWrapperDispatched<
                           PageStorage::kIndices, HEAD_DIM, LOGITS_POST_HOOK, POS_ENCODING_MODE,
                           ALLOW_FP16_QK_REDUCTION, MASK_MODE, c_type, c_type, c_type, int32_t>(
-                          handler_.get(), static_cast<c_type*>(q.data_ptr()),
+                          handler_.get(), static_cast<c_type*>(q.data_ptr()), nullptr,
                           static_cast<int32_t*>(qo_indptr.data_ptr()),
                           /*q_offset=*/nullptr, paged_kv,
                           static_cast<uint8_t*>(custom_mask.data_ptr()),
@@ -423,7 +444,7 @@ std::vector<torch::Tensor> BatchPrefillWithPagedKVCachePyTorchWrapper::ForwardCu
                         cudaError_t status = BatchPrefillWithPagedKVCacheWrapperDispatched<
                             PageStorage::kIndices, HEAD_DIM, LOGITS_POST_HOOK, POS_ENCODING_MODE,
                             ALLOW_FP16_QK_REDUCTION, MASK_MODE, q_type, kv_type, q_type, int32_t>(
-                            handler_.get(), static_cast<q_type*>(q.data_ptr()),
+                            handler_.get(), static_cast<q_type*>(q.data_ptr()), nullptr,
                             static_cast<int32_t*>(qo_indptr.data_ptr()),
                             /*q_offset=*/nullptr, paged_kv,
                             static_cast<uint8_t*>(custom_mask.data_ptr()),

@@ -41,7 +41,7 @@ class BatchPrefillWithPagedKVCachePyTorchWrapper {
   void EndForward();
   bool IsCUDAGraphEnabled() const { return handler_->IsCUDAGraphEnabled(); }
   void UpdatePageLockedBufferSize(uint32_t int_workspace_size_in_bytes);
-  std::vector<torch::Tensor> Forward(torch::Tensor q, torch::Tensor qo_indptr,
+  std::vector<torch::Tensor> Forward(torch::Tensor q, torch::Tensor qo_indptr, std::optional<torch::Tensor> qo_indptr_base,
                                      std::optional<torch::Tensor> paged_kv_cache,
                                      std::optional<torch::Tensor> paged_k_cache,
                                      std::optional<torch::Tensor> paged_v_cache,

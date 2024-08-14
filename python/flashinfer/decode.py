@@ -646,6 +646,7 @@ class BatchDecodeWithPagedKVCacheWrapper:
             out = self._wrapper.forward(
                 q,
                 self._qo_indptr_buf,
+                None,
                 *_unpack_paged_kv_cache(paged_kv_cache, self._kv_layout),
                 self._paged_kv_indptr_buf,
                 self._paged_kv_indices_buf,
@@ -771,6 +772,7 @@ class BatchDecodeWithPagedKVCacheWrapper:
             V, s = self._wrapper.forward(
                 q,
                 self._qo_indptr_buf,
+                None,
                 *_unpack_paged_kv_cache(paged_kv_cache, self._kv_layout),
                 self._paged_kv_indptr_buf,
                 self._paged_kv_indices_buf,

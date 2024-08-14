@@ -145,7 +145,7 @@ cudaError_t BatchPrefillWithPagedKVCacheWrapper(
     uint32_t num_qo_heads, bool causal = true,
     PosEncodingMode pos_encoding_mode = PosEncodingMode::kNone,
     bool allow_fp16_qk_reduction = false, std::optional<float> maybe_sm_scale = std::nullopt,
-    float rope_scale = 1.f, float rope_theta = 1e4, cudaStream_t stream = nullptr) {
+    float rope_scale = 1.f, float rope_theta = 1e4, cudaStream_t stream = nullptr, IdType* qo_indptr_base = nullptr) {
   const float sm_scale = maybe_sm_scale.value_or(1.f / std::sqrt(float(paged_kv.head_dim)));
   const uint32_t num_kv_heads = paged_kv.num_heads;
   const uint32_t head_dim = paged_kv.head_dim;
@@ -160,7 +160,7 @@ cudaError_t BatchPrefillWithPagedKVCacheWrapper(
                 return BatchPrefillWithPagedKVCacheWrapperDispatched<
                     PAGE_STORAGE, HEAD_DIM, LogitsPostHook::kNone, POS_ENCODING_MODE,
                     ALLOW_FP16_QK_REDUCTION, MASK_MODE, DTypeQ, DTypeKV, DTypeOut, IdType>(
-                    handler, q, qo_indptr, q_offset, paged_kv,
+                    handler, q, qo_indptr, qo_indptr_base, q_offset, paged_kv,
                     /*custom_mask=*/nullptr,
                     /*qk_indptr=*/nullptr, o, lse, num_qo_heads, /*window_left=*/-1,
                     /*logits_soft_cap=*/0.f, sm_scale, rope_scale, rope_theta, stream);

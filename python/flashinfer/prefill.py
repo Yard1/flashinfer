@@ -686,6 +686,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         custom_mask: Optional[torch.Tensor] = None,
         packed_custom_mask: Optional[torch.Tensor] = None,
         q_data_type: str = "float16",
+        qo_indptr_base: Optional[torch.Tensor] = None,
     ) -> None:
         r"""Create auxiliary data structures for batch prefill/append attention for
         multiple forward calls within the same prefill/append step.
@@ -772,6 +773,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
             self._paged_kv_indptr_buf.copy_(paged_kv_indptr)
             self._paged_kv_indices_buf[: len(paged_kv_indices)] = paged_kv_indices
             self._paged_kv_last_page_len_buf.copy_(paged_kv_last_page_len)
+            if qo_indptr_base:
+                self._qo_indptr_base_buf.copy_(qo_indptr_base)
 
             if packed_custom_mask is not None:
                 if not torch.is_tensor(self._custom_mask_buf):
@@ -787,6 +790,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 self._qk_indptr_buf.copy_(qk_indptr)
         else:
             self._qo_indptr_buf = qo_indptr
+            self._qo_indptr_base_buf = qo_indptr_base
             self._paged_kv_indptr_buf = paged_kv_indptr
             self._paged_kv_indices_buf = paged_kv_indices
             self._paged_kv_last_page_len_buf = paged_kv_last_page_len
@@ -818,6 +822,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         r"""Clear the auxiliary data structures created by :meth:`begin_forward`."""
         if not self.is_cuda_graph_enabled:
             self._qo_indptr_buf = None
+            self._qo_indptr_base_buf = None
             self._paged_kv_indptr_buf = None
             self._paged_kv_indices_buf = None
             self._paged_kv_last_page_len_buf = None
@@ -914,6 +919,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
             out = self._wrapper.forward(
                 q,
                 self._qo_indptr_buf,
+                self._qo_indptr_base_buf,
                 *_unpack_paged_kv_cache(paged_kv_cache, self._kv_layout),
                 self._paged_kv_indptr_buf,
                 self._paged_kv_indices_buf,
@@ -1041,6 +1047,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
             out, lse = self._wrapper.forward(
                 q,
                 self._qo_indptr_buf,
+                self._qo_indptr_base_buf,
                 *_unpack_paged_kv_cache(paged_kv_cache, self._kv_layout),
                 self._paged_kv_indptr_buf,
                 self._paged_kv_indices_buf,
@@ -1197,6 +1204,7 @@ class BatchPrefillWithRaggedKVCacheWrapper:
         kv_indptr_buf: Optional[torch.Tensor] = None,
         custom_mask_buf: Optional[torch.Tensor] = None,
         qk_indptr_buf: Optional[torch.Tensor] = None,
+        qo_indptr_base_buf: Optional[torch.Tensor] = None,
     ) -> None:
         r"""Constructor of :class:`BatchPrefillWithRaggedKVCacheWrapper`.
 
@@ -1269,6 +1277,7 @@ class BatchPrefillWithRaggedKVCacheWrapper:
         self._kv_indptr_buf = kv_indptr_buf
         self._custom_mask_buf = custom_mask_buf
         self._qk_indptr_buf = qk_indptr_buf
+        self._qo_indptr_base_buf = qo_indptr_base_buf
 
     @property
     def is_cuda_graph_enabled(self) -> bool:

@@ -1602,6 +1602,7 @@ __launch_bounds__(num_warps_x* num_warps_z* warp_size) void BatchPrefillWithPage
     IdType* __restrict__ request_indices, IdType* __restrict__ q_tile_indices,
     IdType* __restrict__ kv_tile_indices, DTypeQ* __restrict__ q,
     paged_kv_t<page_storage, DTypeKV, IdType> paged_kv, IdType* __restrict__ q_indptr,
+    IdType* __restrict__ q_indptr_base,
     uint8_t* __restrict__ custom_mask, IdType* __restrict__ qk_indptr,
     IdType* __restrict__ q_offset, IdType* __restrict__ o_indptr, DTypeOut* __restrict__ o,
     float* __restrict__ lse, bool* __restrict__ block_valid_mask,
@@ -1664,7 +1665,12 @@ __launch_bounds__(num_warps_x* num_warps_z* warp_size) void BatchPrefillWithPage
   const uint32_t q_stride_n = num_qo_heads * head_dim, q_stride_h = head_dim;
   constexpr SwizzleMode swizzle_mode_q = SwizzleMode::k128B;
   smem_t<swizzle_mode_q> qo_smem(smem);
-  DTypeQ* q_ptr_base = q + get_elem_offset_impl(q_indptr[request_idx], kv_head_idx * group_size,
+  IdType q_ind;
+  if (q_indptr_base != nullptr)
+    q_ind = q_indptr_base[request_idx];
+  else
+    q_ind = q_indptr[request_idx];
+  DTypeQ* q_ptr_base = q + get_elem_offset_impl(q_ind, kv_head_idx * group_size,
                                                 (lane_idx % 8) * num_elems_per_128b<DTypeQ>(),
                                                 q_stride_n, q_stride_h);
   DTypeOut* o_ptr_base =
@@ -1694,7 +1700,7 @@ __launch_bounds__(num_warps_x* num_warps_z* warp_size) void BatchPrefillWithPage
     } else {
       q_smem_inplace_apply_rotary_with_pos_multiply_sm_scale<num_warps_x, num_warps_z, num_frags_x,
                                                              num_frags_y, swizzle_mode_q, DTypeQ>(
-          qo_packed_idx_base, q_offset + q_indptr[request_idx], &qo_smem, group_size,
+          qo_packed_idx_base, q_offset + q_ind, &qo_smem, group_size,
           &q_smem_offset_r, rope_freq, sm_scale);
     }
   } else {
@@ -2229,7 +2235,7 @@ template <PageStorage page_storage, WarpLayout WARP_LAYOUT, uint32_t HEAD_DIM,
           typename DTypeOut, typename IdType>
 cudaError_t BatchPrefillWithPagedKVCacheDispatched(
     DTypeQ* q, IdType* request_indices, IdType* q_tile_indices, IdType* kv_tile_indices,
-    IdType* q_indptr, IdType* q_offset, paged_kv_t<page_storage, DTypeKV, IdType> paged_kv,
+    IdType* q_indptr, IdType* q_indptr_base, IdType* q_offset, paged_kv_t<page_storage, DTypeKV, IdType> paged_kv,
     uint8_t* custom_mask, IdType* qk_indptr, IdType* o_indptr, DTypeOut* o, DTypeOut* tmp_v,
     float* tmp_s, float* lse, IdType* merge_indptr, bool* block_valid_mask,
     IdType* kv_chunk_size_ptr, uint32_t total_num_rows, uint32_t num_qo_heads,
@@ -2308,6 +2314,7 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(
                         (void*)&q,
                         (void*)&paged_kv,
                         (void*)&q_indptr,
+                        (void*)&q_indptr_base,
                         (void*)&custom_mask,
                         (void*)&qk_indptr,
                         (void*)&q_offset,
@@ -2333,6 +2340,7 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(
                         (void*)&q,
                         (void*)&paged_kv,
                         (void*)&q_indptr,
+                        (void*)&q_indptr_base,
                         (void*)&custom_mask,
                         (void*)&qk_indptr,
                         (void*)&q_offset,

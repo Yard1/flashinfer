@@ -826,12 +826,15 @@ class BatchPrefillHandler {
     total_num_rows_ = 0U;
     padded_batch_size_ = 0U;
     warp_layout_ = WarpLayout::k4x1x2;
+    output_size_ = -1;
     return cudaSuccess;
   }
 
   cudaStream_t GetCUDAStream() const { return stream_; }
+  int32_t GetOutputSize() const { return output_size_; }
 
   void SetCUDAStream(cudaStream_t stream) { stream_ = stream; }
+  void SetOutputSize(int32_t output_size) { output_size_ = output_size; }
 
   bool IsCUDAGraphEnabled() const { return enable_cuda_graph_; }
 
@@ -875,6 +878,7 @@ class BatchPrefillHandler {
   bool forward_started_;
   bool enable_cuda_graph_;
   cudaStream_t stream_;
+  int32_t output_size_ = -1;
 };
 
 }  // namespace flashinfer

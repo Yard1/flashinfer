@@ -44,7 +44,7 @@ def get_cu_file_str(
         [
             """template cudaError_t BatchPrefillWithPagedKVCacheDispatched<page_storage, {warp_layout}, {head_dim}, {logits_hook}, {pos_encoding_mode}, {allow_fp16_qk_reduction}, {mask_mode}, {dtype_q}, {dtype_kv}, {dtype_out}, {idtype}>(
     {dtype_q}* q, {idtype}* request_indices, {idtype}* q_tile_indices, {idtype}* kv_tile_indices,
-    {idtype}* q_indptr, {idtype}* q_offset,
+    {idtype}* q_indptr, {idtype}* q_indptr_base, {idtype}* q_offset,
     paged_kv_t<page_storage, {dtype_kv}, {idtype}> paged_kv, uint8_t* custom_mask,
     {idtype}* qk_indptr, {idtype}* o_indptr, {dtype_out}* o, {dtype_out}* tmp_v, float* tmp_s, float* lse,
     {idtype}* merge_indptr, bool* block_valid_mask, {idtype}* kv_chunk_size_ptr, uint32_t max_num_rows,

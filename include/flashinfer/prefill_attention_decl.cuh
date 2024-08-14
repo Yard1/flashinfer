@@ -58,7 +58,7 @@ template <PageStorage page_storage, WarpLayout WARP_LAYOUT, uint32_t HEAD_DIM,
           typename DTypeOut, typename IdType>
 cudaError_t BatchPrefillWithPagedKVCacheDispatched(
     DTypeQ* q, IdType* request_indices, IdType* q_tile_indices, IdType* kv_tile_indices,
-    IdType* q_indptr, IdType* q_offset, paged_kv_t<page_storage, DTypeKV, IdType> paged_kv,
+    IdType* q_indptr, IdType* q_indptr_base, IdType* q_offset, paged_kv_t<page_storage, DTypeKV, IdType> paged_kv,
     uint8_t* custom_mask, IdType* qk_indptr, IdType* o_indptr, DTypeOut* o, DTypeOut* tmp_v,
     float* tmp_s, float* lse, IdType* merge_indptr, bool* block_valid_mask,
     IdType* kv_chunk_size_ptr, uint32_t total_num_rows, uint32_t num_qo_heads,
@@ -69,7 +69,7 @@ template <PageStorage PAGE_STORAGE, uint32_t HEAD_DIM, LogitsPostHook LOGITS_POS
           PosEncodingMode POS_ENCODING_MODE, bool ALLOW_FP16_QK_REDUCTION, MaskMode MASK_MODE,
           typename DTypeQ, typename DTypeKV, typename DTypeOut, typename IdType>
 cudaError_t BatchPrefillWithPagedKVCacheWrapperDispatched(
-    BatchPrefillHandler* handler, DTypeQ* q, IdType* q_indptr, IdType* q_offset,
+    BatchPrefillHandler* handler, DTypeQ* q, IdType* q_indptr, IdType* q_indptr_base, IdType* q_offset,
     paged_kv_t<PAGE_STORAGE, DTypeKV, IdType> paged_kv, uint8_t* custom_mask, IdType* qk_indptr,
     DTypeOut* o, float* lse, uint32_t num_qo_heads, int32_t window_left, float logits_soft_cap,
     float sm_scale, float rope_scale, float rope_theta, cudaStream_t stream) {
@@ -105,7 +105,7 @@ cudaError_t BatchPrefillWithPagedKVCacheWrapperDispatched(
     return BatchPrefillWithPagedKVCacheDispatched<
         PAGE_STORAGE, WARP_LAYOUT, HEAD_DIM, LOGITS_POST_HOOK, POS_ENCODING_MODE,
         ALLOW_FP16_QK_REDUCTION, MASK_MODE, DTypeQ, DTypeKV, DTypeOut, IdType>(
-        q, request_indices, qo_tile_indices, kv_tile_indices, q_indptr, q_offset, paged_kv,
+        q, request_indices, qo_tile_indices, kv_tile_indices, q_indptr, q_indptr_base, q_offset, paged_kv,
         custom_mask, qk_indptr, o_indptr, o, tmp_v, tmp_s, lse, merge_indptr, block_valid_mask,
         kv_chunk_size_ptr, total_num_rows, num_qo_heads, padded_batch_size, window_left,
         logits_soft_cap, sm_scale, rope_scale, rope_theta, stream);
